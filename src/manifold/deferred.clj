@@ -33,8 +33,6 @@
     (java.util.concurrent.atomic
       AtomicInteger
       AtomicLong)
-    (java.util.concurrent.locks
-      Lock)
     (java.util.function
       Function
       BiFunction
@@ -393,14 +391,14 @@
   (.cancelListener deferred listener))
 
 (defmacro ^:private set-deferred [val token success? claimed? executor]
-  `(if (utils/with-lock* ~'lock
-         (when (and
-                 (identical? ~(if claimed? ::claimed ::unset) ~'state)
-                 ~@(when claimed?
-                     `((identical? ~'claim-token ~token))))
-           (set! ~'val ~val)
-           (set! ~'state ~(if success? ::success ::error))
-           true))
+  `(if (when (and (identical? @~'state ~(if claimed? ::claimed ::unset)) ;; Avoid CAS failure when possible
+                  (compare-and-set! ~'state
+                                    ~(if claimed? ::claimed ::unset)
+                                    ~(if success? ::success ::error))
+                  ~@(when claimed?
+                      `((identical? ~'claim-token ~token))))
+         (set! ~'val ~val)
+         true)
      (do
        (clojure.core/loop []
          (when-let [^IDeferredListener l# (.poll ~'listeners)]
@@ -433,7 +431,7 @@
 
 (defmacro ^:private deref-deferred [timeout-value & await-args]
   (let [latch-sym (with-meta (gensym "latch") {:tag "java.util.concurrent.CountDownLatch"})]
-    `(condp identical? ~'state
+    `(case @~'state
        ::success ~'val
        ::error   (throw' ~'val)
        (let [~latch-sym (CountDownLatch. 1)
@@ -445,7 +443,7 @@
                              true)
                           `(.await ~latch-sym ~@await-args))]
            (if result#
-             (if (identical? ::success ~'state)
+             (if (identical? ::success @~'state)
                ~'val
                (throw' ~'val))
              ~timeout-value))))))
@@ -466,9 +464,8 @@
 (both
   (deftype+ (either [LeakAwareDeferred] [Deferred])
     [^:volatile-mutable val
-     ^:volatile-mutable state
+     state ;; NOTE: Turned state to atomic
      ^:volatile-mutable claim-token
-     ^Lock lock
      ^LinkedList listeners
      ^:volatile-mutable mta
      ^:volatile-mutable consumed?
@@ -480,9 +477,8 @@
     (either
       [Object
        (finalize [_]
-         (utils/with-lock lock
-           (when (and (identical? ::error state) (not consumed?))
-             (log/warn val "unconsumed deferred in error state, make sure you're using `catch`."))))]
+         (when (and (identical? ::error @state) (not consumed?))
+           (log/warn val "unconsumed deferred in error state, make sure you're using `catch`.")))]
       nil)
 
     clojure.lang.IReference
@@ -496,30 +492,26 @@
 
     IMutableDeferred
     (claim [_]
-      (utils/with-lock* lock
-        (when (identical? state ::unset)
-          (set! state ::claimed)
-          (set! claim-token (Object.)))))
+      (when (compare-and-set! state ::unset ::claimed)
+        (set! claim-token (Object.))))
     (addListener [_ listener]
       (set! consumed? true)
-      (when-let [f (utils/with-lock* lock
-                     (condp identical? state
-                       ::success #(.onSuccess ^IDeferredListener listener val)
-                       ::error   #(.onError ^IDeferredListener listener val)
-                       (do
-                         (.add listeners listener)
-                         nil)))]
+      (when-let [f (case @state
+                     ::success #(.onSuccess ^IDeferredListener listener val)
+                     ::error   #(.onError ^IDeferredListener listener val)
+                     (do
+                       (.add listeners listener)
+                       nil))]
         (if executor
           (.execute executor f)
           (f)))
       true)
     (cancelListener [_ listener]
-      (utils/with-lock* lock
-        (let [state state]
-          (if (or (identical? ::unset state)
-                  (identical? ::set state))
-            (.remove listeners listener)
-            false))))
+      (let [state @state]
+        (if (or (identical? ::unset state)
+                (identical? ::set state))
+          (.remove listeners listener)
+          false)))
     (success [_ x]
       (set-deferred x nil true false executor))
     (success [_ x token]
@@ -540,19 +532,19 @@
     (executor [_]
       executor)
     (realized [_]
-      (let [state state]
+      (let [state @state]
         (or (identical? ::success state)
             (identical? ::error state))))
     (onRealized [this on-success on-error]
       (add-listener! this (listener on-success on-error)))
     (successValue [this default-value]
-      (if (identical? ::success state)
+      (if (identical? ::success @state)
         (do
           (set! consumed? true)
           val)
         default-value))
     (errorValue [this default-value]
-      (if (identical? ::error state)
+      (if (identical? ::error @state)
         (do
           (set! consumed? true)
           val)
@@ -572,16 +564,15 @@
 
 (deftype+ SuccessDeferred
   [val
-   ^:volatile-mutable mta
+   mta
    ^Executor executor]
 
   clojure.lang.IReference
   (meta [_] mta)
   (resetMeta [_ m]
-    (set! mta m))
+    (reset! mta m))
   (alterMeta [this f args]
-    (locking this
-      (set! mta (apply f mta args))))
+    (swap! mta f args))
 
   IMutableDeferred
   (claim [_] false)
@@ -622,7 +613,7 @@
 
 (deftype+ ErrorDeferred
   [^Throwable error
-   ^:volatile-mutable mta
+   mta
    ^:volatile-mutable consumed?
    ^Executor executor]
 
@@ -634,12 +625,11 @@
       (log/warn error "unconsumed deferred in error state, make sure you're using `catch`.")))
 
   clojure.lang.IReference
-  (meta [_] mta)
+  (meta [_] @mta)
   (resetMeta [_ m]
-    (set! mta m))
+    (reset! mta m))
   (alterMeta [this f args]
-    (locking this
-      (set! mta (apply f mta args))))
+    (swap! mta f args))
 
   IMutableDeferred
   (claim [_] false)
@@ -695,9 +685,9 @@
        (LeakAwareDeferred. nil ::unset nil (utils/mutex) (LinkedList.) nil false executor)
        (Deferred. nil ::unset nil (utils/mutex) (LinkedList.) nil false executor)))))
 
-(def ^:no-doc true-deferred- (SuccessDeferred. true nil nil))
-(def ^:no-doc false-deferred- (SuccessDeferred. false nil nil))
-(def ^:no-doc nil-deferred- (SuccessDeferred. nil nil nil))
+(def ^:no-doc true-deferred- (SuccessDeferred. true (atom nil) nil))
+(def ^:no-doc false-deferred- (SuccessDeferred. false (atom nil) nil))
+(def ^:no-doc nil-deferred- (SuccessDeferred. nil (atom nil) nil))
 
 (defn success-deferred
   "A deferred which already contains a realized value"
@@ -707,25 +697,25 @@
          (p/true? val)   'manifold.deferred/true-deferred-
          (p/false? val)  'manifold.deferred/false-deferred-
          (nil? val)    'manifold.deferred/nil-deferred-
-         :else         `(SuccessDeferred. ~val nil nil)))
+         :else         `(SuccessDeferred. ~val (atom nil) nil)))
    :inline-arities #{1}}
   ([val]
-   (SuccessDeferred. val nil (ex/executor)))
+   (SuccessDeferred. val (atom nil) (ex/executor)))
   ([val executor]
    (if (nil? executor)
      (condp identical? val
        true true-deferred-
        false false-deferred-
        nil nil-deferred-
-       (SuccessDeferred. val nil nil))
-     (SuccessDeferred. val nil executor))))
+       (SuccessDeferred. val (atom nil) nil))
+     (SuccessDeferred. val (atom nil) executor))))
 
 (defn error-deferred
   "A deferred which already contains a realized error"
   ([error]
-   (ErrorDeferred. error nil false (ex/executor)))
+   (ErrorDeferred. error (atom nil) false (ex/executor)))
   ([error executor]
-   (ErrorDeferred. error nil false executor)))
+   (ErrorDeferred. error (atom nil) false executor)))
 
 (declare chain)
 
