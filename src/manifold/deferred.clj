@@ -486,7 +486,7 @@
       nil)
 
     clojure.lang.IReference
-    (meta [_] mta)
+    (meta [_] @mta)
     (resetMeta [_ m]
       (reset! mta m))
     (alterMeta [_ f args]
@@ -684,8 +684,8 @@
     ([executor]
      (if (and (p/zero? (rem (.incrementAndGet created) 1024))
               debug/*dropped-error-logging-enabled?*)
-       (LeakAwareDeferred. nil ::unset nil (utils/mutex) (LinkedList.) nil false executor)
-       (Deferred. nil ::unset nil (utils/mutex) (LinkedList.) nil false executor)))))
+       (LeakAwareDeferred. nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)
+       (Deferred. nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)))))
 
 (def ^:no-doc true-deferred- (SuccessDeferred. true (atom nil) nil))
 (def ^:no-doc false-deferred- (SuccessDeferred. false (atom nil) nil))
