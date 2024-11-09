@@ -467,7 +467,7 @@
      state ;; NOTE: Turned state to atomic
      ^:volatile-mutable claim-token
      ^LinkedList listeners
-     ^:volatile-mutable mta
+     mta
      ^:volatile-mutable consumed?
      ^Executor executor]
 
@@ -484,11 +484,9 @@
     clojure.lang.IReference
     (meta [_] mta)
     (resetMeta [_ m]
-      (utils/with-lock* lock
-        (set! mta m)))
+      (reset! mta m))
     (alterMeta [_ f args]
-      (utils/with-lock* lock
-        (set! mta (apply f mta args))))
+      (swap! mta f args))
 
     IMutableDeferred
     (claim [_]
