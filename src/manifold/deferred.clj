@@ -225,10 +225,10 @@
 ;; TODO: do some sort of periodic sampling so multiple futures can share a thread
 (defn- register-future-callbacks [x on-success on-error]
   (if (or
-       (when (instance? Future x)
-         (or (.isDone ^Future x) (.isCancelled ^Future x)))
-       (when (instance? IPending x)
-         (.isRealized ^IPending x)))
+        (when (instance? Future x)
+          (or (.isDone ^Future x) (.isCancelled ^Future x)))
+        (when (instance? IPending x)
+          (.isRealized ^IPending x)))
     (try
       (on-success @x)
       (catch Throwable e
