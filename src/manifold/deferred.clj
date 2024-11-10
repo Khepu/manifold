@@ -390,12 +390,12 @@
   (.cancelListener deferred listener))
 
 (defmacro ^:private set-deferred [val token success? claimed? executor]
-  `(if (when (and (identical? @~'state ~(if claimed? ::claimed ::unset)) ;; Avoid CAS failure when possible
+  `(if (when (and ~@(when claimed?
+                      `((identical? ~'claim-token ~token)))
+                  (identical? @~'state ~(if claimed? ::claimed ::unset)) ;; Avoid CAS failure when possible
                   (compare-and-set! ~'state
                                     ~(if claimed? ::claimed ::unset)
-                                    ~(if success? ::success ::error))
-                  ~@(when claimed?
-                      `((identical? ~'claim-token ~token))))
+                                    ~(if success? ::success ::error)))
          (set! ~'val ~val)
          true)
      (do
