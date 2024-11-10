@@ -20,8 +20,6 @@
       IDeref)
     (java.io
       Writer)
-    (java.util
-      LinkedList)
     (java.util.concurrent
       Future
       TimeoutException
@@ -29,7 +27,8 @@
       CountDownLatch
       Executor
       CompletionStage
-      CompletableFuture)
+      CompletableFuture
+      ConcurrentLinkedQueue)
     (java.util.concurrent.atomic
       AtomicInteger
       AtomicLong)
@@ -466,7 +465,7 @@
     [^:volatile-mutable val
      state ;; NOTE: Turned state to atomic
      ^:volatile-mutable claim-token
-     ^LinkedList listeners
+     ^ConcurrentLinkedQueue listeners
      mta
      ^:volatile-mutable consumed?
      ^Executor executor]
@@ -681,8 +680,8 @@
     ([executor]
      (if (and (p/zero? (rem (.incrementAndGet created) 1024))
               debug/*dropped-error-logging-enabled?*)
-       (LeakAwareDeferred. nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)
-       (Deferred.          nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)))))
+       (LeakAwareDeferred. nil (atom ::unset) nil (ConcurrentLinkedQueue.) (atom nil) false executor)
+       (Deferred.          nil (atom ::unset) nil (ConcurrentLinkedQueue.) (atom nil) false executor)))))
 
 (def ^:no-doc true-deferred- (SuccessDeferred. true (atom nil) nil))
 (def ^:no-doc false-deferred- (SuccessDeferred. false (atom nil) nil))
