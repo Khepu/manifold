@@ -390,15 +390,14 @@
   (.cancelListener deferred listener))
 
 (defmacro ^:private set-deferred [val token success? claimed? executor]
-  `(if (when (and ~@(when claimed?
-                      `((identical? ~'claim-token ~token)))
-                  (identical? @~'state ~(if claimed? ::claimed ::unset)) ;; Avoid CAS failure when possible
-                  (compare-and-set! ~'state
-                                    ~(if claimed? ::claimed ::unset)
-                                    ~(if success? ::success ::error)))
-         (set! ~'val ~val)
-         true)
+  `(if (and ~@(when claimed?
+                `((identical? ~'claim-token ~token)))
+            (identical? @~'state ~(if claimed? ::claimed ::unset)) ;; Avoid CAS failure when possible
+            (compare-and-set! ~'state
+                              ~(if claimed? ::claimed ::unset)
+                              ~(if success? ::success ::error)))
      (do
+       (set! ~'val ~val)
        (clojure.core/loop []
          (when-let [^IDeferredListener l# (.poll ~'listeners)]
            (try
