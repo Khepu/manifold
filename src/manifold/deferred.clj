@@ -686,7 +686,7 @@
      (if (and (p/zero? (rem (.incrementAndGet created) 1024))
               debug/*dropped-error-logging-enabled?*)
        (LeakAwareDeferred. nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)
-       (Deferred. nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)))))
+       (Deferred.          nil (atom ::unset) nil (LinkedList.) (atom nil) false executor)))))
 
 (def ^:no-doc true-deferred- (SuccessDeferred. true (atom nil) nil))
 (def ^:no-doc false-deferred- (SuccessDeferred. false (atom nil) nil))
@@ -749,7 +749,7 @@
   [a b]
   (assert (deferred? b) "sink `b` must be a Manifold deferred")
   (let [a (unwrap a)]
-    (if (instance? IDeferred a)
+    (if (deferred? a)
       (if (realized? b)
         false
         (do
