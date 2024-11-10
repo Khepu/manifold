@@ -494,7 +494,8 @@
 
     IMutableDeferred
     (claim [_]
-      (when (compare-and-set! state ::unset ::claimed)
+      (when (and (identical? @state ::unset)
+                 (compare-and-set! state ::unset ::claimed))
         (set! claim-token (Object.))))
     (addListener [_ listener]
       (set! consumed? true)
@@ -570,7 +571,7 @@
    ^Executor executor]
 
   clojure.lang.IReference
-  (meta [_] mta)
+  (meta [_] @mta)
   (resetMeta [_ m]
     (reset! mta m))
   (alterMeta [this f args]
